@@ -1,1 +1,1 @@
-# openmeteo-weather-air-quality
+# Weather and Air Quality Monitor
