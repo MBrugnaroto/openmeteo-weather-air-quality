@@ -1,0 +1,19 @@
+{
+  "regioes": {
+    "sul": [
+      { "nome": "Porto Alegre", "lat": -30.03, "lon": -51.23 },
+      { "nome": "Curitiba", "lat": -25.43, "lon": -49.27 },
+      { "nome": "Florianópolis", "lat": -27.59, "lon": -48.55 }
+    ],
+    "sudeste": [
+      { "nome": "São Paulo", "lat": -23.55, "lon": -46.63 },
+      { "nome": "Rio de Janeiro", "lat": -22.91, "lon": -43.17 },
+      { "nome": "Belo Horizonte", "lat": -19.92, "lon": -43.94 }
+    ],
+    "nordeste": [
+      { "nome": "Salvador", "lat": -12.97, "lon": -38.51 },
+      { "nome": "Recife", "lat": -8.05, "lon": -34.88 },
+      { "nome": "Fortaleza", "lat": -3.73, "lon": -38.53 }
+    ]
+  }
+}
