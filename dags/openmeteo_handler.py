@@ -4,7 +4,7 @@ import json
 from typing import TypedDict
 from pathlib import Path
 
-from airflow.sdk import dag, task
+from airflow.sdk import dag, task, Asset
 from include.openmeteo.etl import process_data
 
 
@@ -26,6 +26,20 @@ DATASETS: dict[str, DatasetConfig] = {
         "data_type": "air_quality"
     }
 }
+CONTEXT_WEATHER = Asset(
+    uri="x-openmeteo://context/weather",
+    name="context.weather",
+    extra={
+        "dag_id": "openmeteo_handler"
+    }
+)
+CONTEXT_AIR_QUALITY = Asset(
+    uri="x-openmeteo://context/air_quality",
+    name="context.air_quality",
+    extra={
+        "dag_id": "openmeteo_handler"
+    }
+)
 
 
 @dag(
@@ -44,6 +58,14 @@ def openmeteo_handler():
 
         return regions['regioes']['sul']
 
+    @task(outlets=[CONTEXT_WEATHER])
+    def publish_weather_asset(*, outlet_events):
+        outlet_events[CONTEXT_WEATHER].extra = {"status": "complete"}
+
+    @task(outlets=[CONTEXT_AIR_QUALITY])
+    def publish_air_quality_asset(*, outlet_events):
+        outlet_events[CONTEXT_AIR_QUALITY].extra = {"status": "complete"}
+
     cities = get_cities_list()
     weather_data = (process_data
         .override(group_id="weather_etl", group_display_name="Weather ETL")
@@ -57,6 +79,8 @@ def openmeteo_handler():
         .expand(city=cities)
     )
 
+    weather_data >> publish_weather_asset()
+    air_quality_data >> publish_air_quality_asset()
 
 
 openmeteo_handler()
