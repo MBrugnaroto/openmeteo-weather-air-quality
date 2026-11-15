@@ -48,8 +48,19 @@ def openmeteo_handler():
 
     @task_group(group_id="openmeteo_etl", group_display_name="Open-Meteo ETL")
     def process_data(city: dict, data_type: DATATYPE) -> dict:
-        @task
+
+        @task(map_index_template="{{ extract_step }}")
         def fetch_data(city: dict, data_type: DATATYPE) -> str:
+            city_name = city.get('nome')
+            context = get_current_context()
+            context["extract_step"] = (
+                f"extract-{data_type}-{city_name}"
+                .replace("_", "-")
+                .replace(" ", "-")
+                .lower()
+            )
+            logical_date = context["logical_date"]
+
             config: DatasetConfig = DATASETS.get(data_type)
             cache_session = requests_cache.CachedSession(f'.{data_type}cache', expire_after = 3600)
             retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
@@ -63,7 +74,6 @@ def openmeteo_handler():
             responses = openmeteo.weather_api(config.get('url'), params=params)
             hourly = responses[0].Hourly()
 
-            logical_date = get_current_context()['logical_date']
             year = logical_date.strftime("%Y")
             month = logical_date.strftime("%m")
             day = logical_date.strftime("%d")
@@ -94,7 +104,7 @@ def openmeteo_handler():
                 f"year={year}" /
                 f"month={month}" /
                 f"day={day}" /
-                f"sul_{city.get('nome')}_{hour}.json"
+                f"sul_{city_name}_{hour}.json"
             )
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,14 +121,24 @@ def openmeteo_handler():
                 "raw_path": str(output_path)
             }
 
-        @task
+        @task(map_index_template = "{{ transform_step }}")
         def adding_context_to_data(ti: TaskInstance, extract_infos: dict):
+            city_name = extract_infos.get("city").get('nome')
+            data_type = extract_infos.get('data_type')
+            context = get_current_context()
+            context["transform_step"] = (
+                f"transform-{data_type}-{city_name}"
+                .replace("_", "-")
+                .replace(" ", "-")
+                .lower()
+            )
+
             with open(extract_infos.get('raw_path'), "r", encoding="utf-8") as file:
                 data = json.load(file)
 
             context = {
                 "region:": "sul",
-                "city": extract_infos.get("city").get('nome'),
+                "city": city_name,
                 "lat": extract_infos.get("city").get('lat'),
                 "lng": extract_infos.get("city").get('lon'),
                 "extract_ts": ti.start_date.isoformat()
@@ -133,11 +153,11 @@ def openmeteo_handler():
                 PROJECT_ROOT_PATH /
                 'data' /
                 'context' /
-                extract_infos.get('data_type') /
+                data_type /
                 f"year={year}" /
                 f"month={month}" /
                 f"day={day}" /
-                f"sul_{extract_infos.get("city").get('nome')}.parquet"
+                f"sul_{city_name}.parquet"
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
