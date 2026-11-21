@@ -14,10 +14,10 @@ PROJECT_ROOT_PATH = Path(__file__).resolve().parents[2]
 
 
 @task_group(group_id="openmeteo_etl", group_display_name="Open-Meteo ETL")
-def process_data(city: dict, config: dict) -> dict:
+def process_data(city: dict, config: dict, region: str) -> dict:
 
     @task(map_index_template="{{ extract_step }}")
-    def fetch_data(city: dict, config: dict) -> str:
+    def fetch_data(city: dict, config: dict, region: str) -> str:
         data_type = config.get('data_type')
         city_name = city.get('nome')
         context = get_current_context()
@@ -71,7 +71,7 @@ def process_data(city: dict, config: dict) -> dict:
             f"year={year}" /
             f"month={month}" /
             f"day={day}" /
-            f"sul_{city_name}_{hour}.json"
+            f"{region}_{city_name}_{hour}.json"
         )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +85,7 @@ def process_data(city: dict, config: dict) -> dict:
             "month": month,
             "day": day,
             "hour": hour,
+            "region": region,
             "raw_path": str(output_path)
         }
 
@@ -104,7 +105,7 @@ def process_data(city: dict, config: dict) -> dict:
             data = json.load(file)
 
         context = {
-            "region:": "sul",
+            "region": extract_infos.get("region"),
             "city": city_name,
             "lat": extract_infos.get("city").get('lat'),
             "lng": extract_infos.get("city").get('lon'),
@@ -124,11 +125,11 @@ def process_data(city: dict, config: dict) -> dict:
             f"year={year}" /
             f"month={month}" /
             f"day={day}" /
-            f"sul_{city_name}.parquet"
+            f"{extract_infos.get('region')}_{city_name}.parquet"
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         df.to_parquet(output_path)
 
-    extracted_infos = fetch_data(city=city, config=config)
+    extracted_infos = fetch_data(city=city, config=config, region=region)
     adding_context_to_data(extract_infos=extracted_infos)

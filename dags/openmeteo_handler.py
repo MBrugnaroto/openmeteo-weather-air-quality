@@ -1,11 +1,13 @@
+from datetime import datetime
 import pendulum
 import json
 
 from typing import TypedDict
 from pathlib import Path
 
-from airflow.sdk import dag, task, Asset
+from airflow.sdk import dag, task, get_current_context, Param
 from include.openmeteo.etl import process_data
+from include.openmeteo.assets import CONTEXT_AIR_QUALITY, CONTEXT_WEATHER
 
 
 class DatasetConfig(TypedDict):
@@ -26,20 +28,6 @@ DATASETS: dict[str, DatasetConfig] = {
         "data_type": "air_quality"
     }
 }
-CONTEXT_WEATHER = Asset(
-    uri="x-openmeteo://context/weather",
-    name="context.weather",
-    extra={
-        "dag_id": "openmeteo_handler"
-    }
-)
-CONTEXT_AIR_QUALITY = Asset(
-    uri="x-openmeteo://context/air_quality",
-    name="context.air_quality",
-    extra={
-        "dag_id": "openmeteo_handler"
-    }
-)
 
 
 @dag(
@@ -47,35 +35,67 @@ CONTEXT_AIR_QUALITY = Asset(
     schedule="@daily",
     doc_md=__doc__,
     dag_display_name="Open-Meteo Weather and Air Quality Extractor",
+    params={
+        "region": Param(
+            "sul",
+            type="string",
+            title="Região",
+            description="Região brasileira cujas cidades serão consultadas.",
+            enum=["sul", "sudeste", "nordeste"],
+        )
+    }
 )
 def openmeteo_handler():
 
     @task
-    def get_cities_list() -> list:
+    def get_region() -> str:
+        context = get_current_context()
+        return context["params"]["region"]
+
+    @task
+    def get_cities_list(region: str) -> list:
         cities_path = PROJECT_ROOT_PATH / "data" / "input" / "cities.json"
         with cities_path.open("r", encoding="utf-8") as file:
             regions = json.load(file)
 
-        return regions['regioes']['sul']
+        try:
+            return regions["regioes"][region]
+        except KeyError as error:
+            raise ValueError(
+                f"Invalid region: '{region}'. Use sul, sudeste or nordeste."
+            ) from error
 
     @task(outlets=[CONTEXT_WEATHER])
     def publish_weather_asset(*, outlet_events):
-        outlet_events[CONTEXT_WEATHER].extra = {"status": "complete"}
+        context = get_current_context()
+        dag_run = context["dag_run"]
+
+        outlet_events[CONTEXT_WEATHER].extra = {
+            "process_date": context["logical_date"].strftime("%Y-%m-%d"),
+            "is_backfill": dag_run.run_type == "backfill",
+        }
 
     @task(outlets=[CONTEXT_AIR_QUALITY])
     def publish_air_quality_asset(*, outlet_events):
-        outlet_events[CONTEXT_AIR_QUALITY].extra = {"status": "complete"}
+        context = get_current_context()
+        dag_run = context["dag_run"]
 
-    cities = get_cities_list()
+        outlet_events[CONTEXT_AIR_QUALITY].extra = {
+            "process_date": context["logical_date"].strftime("%Y-%m-%d"),
+            "is_backfill": dag_run.run_type == "backfill",
+        }
+
+    region = get_region()
+    cities = get_cities_list(region=region)
     weather_data = (process_data
         .override(group_id="weather_etl", group_display_name="Weather ETL")
-        .partial(config=DATASETS.get('weather'))
+        .partial(config=DATASETS.get('weather'), region=region)
         .expand(city=cities)
     )
 
     air_quality_data = (process_data
         .override(group_id="air_quality_etl", group_display_name="Air Quality ETL")
-        .partial(config=DATASETS.get('air_quality'))
+        .partial(config=DATASETS.get('air_quality'), region=region)
         .expand(city=cities)
     )
 
