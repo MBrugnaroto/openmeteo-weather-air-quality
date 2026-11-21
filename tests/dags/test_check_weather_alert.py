@@ -62,7 +62,7 @@ def test_loads_requested_partition_and_includes_threshold(tmp_path):
         weather_data["temperature_2m"] >= TEMPERATURE_THRESHOLD_C
     ]
 
-    assert alerts["temperature_2m"].tolist() == [25, 30, 26, 27]
+    assert alerts["temperature_2m"].tolist() == [30]
     assert weather_path == tmp_path / "year=2026" / "month=11" / "day=18"
     assert relative_partition == Path("year=2026") / "month=11" / "day=18"
 
@@ -87,19 +87,8 @@ def test_loads_requested_partition_and_includes_threshold(tmp_path):
             "date": "2026-11-18",
             "alert_label": ALERT_LABEL,
         },
-        {
-            "city": "Porto Alegre",
-            "region": "sul",
-            "date": "2026-11-18",
-            "alert_label": ALERT_LABEL,
-        },
     ]
-    assert pd.read_parquet(output_path)["temperature_2m"].tolist() == [
-        25,
-        30,
-        26,
-        27,
-    ]
+    assert pd.read_parquet(output_path)["temperature_2m"].tolist() == [30]
 
 
 def test_writes_empty_partition_and_returns_no_alert(tmp_path):
@@ -179,8 +168,8 @@ def test_loads_city_report_for_requested_region(tmp_path):
     partition.mkdir(parents=True)
     pd.DataFrame(
         {
-            "region": ["sul", "nordeste"],
-            "city": ["São José", "São José"],
+            "region": ["sudeste", "sul"],
+            "city": ["São Paulo", "São Paulo"],
             "forcast_ts": [
                 "2026-11-18T00:00:00+00:00",
                 "2026-11-18T00:00:00+00:00",
@@ -191,12 +180,12 @@ def test_loads_city_report_for_requested_region(tmp_path):
 
     report_data = _load_city_weather_report(
         tmp_path,
-        "São José",
+        "São Paulo",
         "2026-11-18",
-        region="sul",
+        region="Sudeste",
     )
 
-    assert report_data["region"] == "sul"
+    assert report_data["region"] == "sudeste"
     assert report_data["summary"]["max_c"] == 21
 
 

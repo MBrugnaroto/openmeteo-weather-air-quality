@@ -65,6 +65,7 @@ def create_region_dag(region: str, cities: list[dict]):
 
             outlet_events[CONTEXT_AIR_QUALITY].extra = {
                 "process_date": context["logical_date"].strftime("%Y-%m-%d"),
+                "region": region,
                 "is_backfill": dag_run.run_type == "backfill",
             }
 

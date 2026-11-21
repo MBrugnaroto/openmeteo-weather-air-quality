@@ -11,7 +11,7 @@ from include.openmeteo.agents.tools.weather import weather_toolset
 
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parents[1]
-TEMPERATURE_THRESHOLD_C = 25
+TEMPERATURE_THRESHOLD_C = 30
 ALERT_LABEL = "Alerta de temperatura: limite atingido"
 
 

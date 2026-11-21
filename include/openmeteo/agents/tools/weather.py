@@ -30,7 +30,13 @@ def _load_city_weather_report(
 
     city_mask = weather_data["city"] == city
     if region is not None:
-        city_mask &= weather_data["region"] == region
+        city_mask &= (
+            weather_data["region"]
+            .astype("string")
+            .str.strip()
+            .str.casefold()
+            == region.strip().casefold()
+        )
     city_data = weather_data.loc[city_mask]
     if city_data.empty:
         region_context = f" in region {region!r}" if region is not None else ""
@@ -126,7 +132,7 @@ def _write_weather_report(
     )
     reports_path = path / partition / "reports"
     if region is not None:
-        reports_path /= f"region={region}"
+        reports_path /= f"region={region.strip().casefold()}"
     output_path = reports_path / f"{city_slug}.md"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(f"{report_markdown.strip()}\n", encoding="utf-8")
