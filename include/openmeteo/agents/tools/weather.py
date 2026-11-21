@@ -18,6 +18,7 @@ def _load_city_weather_report(
     analysis_date: str,
     temperature_threshold: float = 25,
     alert_label: str = "Alerta de temperatura: limite atingido",
+    region: str | None = None,
 ) -> dict[str, Any]:
     partition_date = date.fromisoformat(analysis_date)
     partition = (
@@ -27,10 +28,15 @@ def _load_city_weather_report(
     )
     weather_data = pd.read_parquet(path / partition)
 
-    city_data = weather_data.loc[weather_data["city"] == city]
+    city_mask = weather_data["city"] == city
+    if region is not None:
+        city_mask &= weather_data["region"] == region
+    city_data = weather_data.loc[city_mask]
     if city_data.empty:
+        region_context = f" in region {region!r}" if region is not None else ""
         raise ValueError(
-            f"No weather data found for city {city!r} on {analysis_date}"
+            f"No weather data found for city {city!r}{region_context} "
+            f"on {analysis_date}"
         )
 
     forecast_dates = pd.to_datetime(
@@ -96,6 +102,7 @@ def _write_weather_report(
     city: str,
     analysis_date: str,
     report_markdown: str,
+    region: str | None = None,
 ) -> Path:
     if not report_markdown.strip():
         raise ValueError("The Markdown report must not be empty")
@@ -117,7 +124,10 @@ def _write_weather_report(
         / f"month={partition_date:%m}"
         / f"day={partition_date:%d}"
     )
-    output_path = path / partition / "reports" / f"{city_slug}.md"
+    reports_path = path / partition / "reports"
+    if region is not None:
+        reports_path /= f"region={region}"
+    output_path = reports_path / f"{city_slug}.md"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(f"{report_markdown.strip()}\n", encoding="utf-8")
     return output_path
@@ -131,12 +141,14 @@ def load_weather_data(
     ctx: RunContext[None],
     city: str,
     analysis_date: str,
+    region: str | None = None,
 ) -> dict[str, Any]:
-    """Load hourly forecast data and summary for a city and date."""
+    """Load hourly forecast data and summary for a city, region, and date."""
     return _load_city_weather_report(
         PROJECT_ROOT_PATH / "data" / "context" / "weather",
         city,
         analysis_date,
+        region=region,
     )
 
 
@@ -146,6 +158,7 @@ def write_weather_report(
     city: str,
     analysis_date: str,
     report_markdown: str,
+    region: str | None = None,
 ) -> str:
     """Write the final Markdown weather report and return its workspace path."""
     output_path = _write_weather_report(
@@ -153,5 +166,6 @@ def write_weather_report(
         city,
         analysis_date,
         report_markdown,
+        region=region,
     )
     return str(output_path.relative_to(PROJECT_ROOT_PATH))

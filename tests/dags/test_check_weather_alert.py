@@ -6,6 +6,7 @@ from dags.issue_temp_alert_report import (
     ALERT_LABEL,
     TEMPERATURE_THRESHOLD_C,
     _get_partition,
+    _load_region_weather_data,
     _write_temperature_alerts,
 )
 from include.openmeteo.agents.tools.weather import (
@@ -69,18 +70,26 @@ def test_loads_requested_partition_and_includes_threshold(tmp_path):
         tmp_path
         / "semantic"
         / relative_partition
+        / "region=sul"
         / "weather_alerts.parquet"
     )
     city_alerts = _write_temperature_alerts(
         alerts,
         output_path,
         analysis_date="2026-11-18",
+        region="sul",
     )
 
     assert city_alerts == [
-        {"city": "Curitiba", "date": "2026-11-18", "alert_label": ALERT_LABEL},
+        {
+            "city": "Curitiba",
+            "region": "sul",
+            "date": "2026-11-18",
+            "alert_label": ALERT_LABEL,
+        },
         {
             "city": "Porto Alegre",
+            "region": "sul",
             "date": "2026-11-18",
             "alert_label": ALERT_LABEL,
         },
@@ -101,11 +110,32 @@ def test_writes_empty_partition_and_returns_no_alert(tmp_path):
         alerts,
         output_path,
         analysis_date="2026-11-18",
+        region="sul",
     )
 
     assert city_alerts == []
     assert output_path.exists()
     assert pd.read_parquet(output_path).empty
+
+
+def test_loads_only_requested_region_files(tmp_path):
+    partition = tmp_path / "year=2026" / "month=11" / "day=18"
+    partition.mkdir(parents=True)
+    pd.DataFrame(
+        {"region": ["sul"], "city": ["Curitiba"], "temperature_2m": [26]}
+    ).to_parquet(partition / "sul_Curitiba.parquet")
+    pd.DataFrame(
+        {"region": ["nordeste"], "city": ["Recife"], "temperature_2m": [30]}
+    ).to_parquet(partition / "nordeste_Recife.parquet")
+
+    weather_data, relative_partition = _load_region_weather_data(
+        tmp_path,
+        "sul",
+        "2026-11-18",
+    )
+
+    assert relative_partition == Path("year=2026") / "month=11" / "day=18"
+    assert weather_data["city"].tolist() == ["Curitiba"]
 
 
 def test_loads_city_report_for_requested_date(tmp_path):
@@ -144,6 +174,32 @@ def test_loads_city_report_for_requested_date(tmp_path):
     ]
 
 
+def test_loads_city_report_for_requested_region(tmp_path):
+    partition = tmp_path / "year=2026" / "month=11" / "day=18"
+    partition.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "region": ["sul", "nordeste"],
+            "city": ["São José", "São José"],
+            "forcast_ts": [
+                "2026-11-18T00:00:00+00:00",
+                "2026-11-18T00:00:00+00:00",
+            ],
+            "temperature_2m": [21, 31],
+        }
+    ).to_parquet(partition / "same_city_name.parquet")
+
+    report_data = _load_city_weather_report(
+        tmp_path,
+        "São José",
+        "2026-11-18",
+        region="sul",
+    )
+
+    assert report_data["region"] == "sul"
+    assert report_data["summary"]["max_c"] == 21
+
+
 def test_writes_formatted_report_to_city_partition(tmp_path):
     report_markdown = "# Alerta de temperatura\n\nTexto do relatório."
 
@@ -165,4 +221,25 @@ def test_writes_formatted_report_to_city_partition(tmp_path):
     )
     assert output_path.read_text(encoding="utf-8") == (
         "# Alerta de temperatura\n\nTexto do relatório.\n"
+    )
+
+
+def test_writes_report_to_region_specific_partition(tmp_path):
+    output_path = _write_weather_report(
+        tmp_path / "weather",
+        "Curitiba",
+        "2026-11-18",
+        "# Alerta de temperatura",
+        region="sul",
+    )
+
+    assert output_path == (
+        tmp_path
+        / "weather"
+        / "year=2026"
+        / "month=11"
+        / "day=18"
+        / "reports"
+        / "region=sul"
+        / "curitiba.md"
     )

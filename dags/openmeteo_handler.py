@@ -1,11 +1,10 @@
-from datetime import datetime
 import pendulum
 import json
 
 from typing import TypedDict
 from pathlib import Path
 
-from airflow.sdk import dag, task, get_current_context, Param
+from airflow.sdk import dag, task, get_current_context
 from include.openmeteo.etl import process_data
 from include.openmeteo.assets import CONTEXT_AIR_QUALITY, CONTEXT_WEATHER
 
@@ -30,77 +29,62 @@ DATASETS: dict[str, DatasetConfig] = {
 }
 
 
-@dag(
-    start_date=pendulum.datetime(2025, 4, 22),
-    schedule="@daily",
-    doc_md=__doc__,
-    dag_display_name="Open-Meteo Weather and Air Quality Extractor",
-    params={
-        "region": Param(
-            "sul",
-            type="string",
-            title="Região",
-            description="Região brasileira cujas cidades serão consultadas.",
-            enum=["sul", "sudeste", "nordeste"],
+CITIES_PATH = PROJECT_ROOT_PATH / "data" / "input" / "cities.json"
+with CITIES_PATH.open("r", encoding="utf-8") as file:
+    CITIES_BY_REGION = json.load(file)["regioes"]
+
+
+def create_region_dag(region: str, cities: list[dict]):
+    dag_id = f"openmeteo_{region}"
+
+    @dag(
+        dag_id=dag_id,
+        start_date=pendulum.datetime(2025, 4, 22),
+        schedule="@daily",
+        dag_display_name=f"Open-Meteo - {region.title()}",
+        tags=["openmeteo", region],
+        default_args={"retries": 2},
+        auto_register=True
+    )
+    def regional_openmeteo_dag():
+        @task(outlets=[CONTEXT_WEATHER])
+        def publish_weather_asset(*, outlet_events):
+            context = get_current_context()
+            dag_run = context["dag_run"]
+
+            outlet_events[CONTEXT_WEATHER].extra = {
+                "process_date": context["logical_date"].strftime("%Y-%m-%d"),
+                "region": region,
+                "is_backfill": dag_run.run_type == "backfill",
+            }
+
+        @task(outlets=[CONTEXT_AIR_QUALITY])
+        def publish_air_quality_asset(*, outlet_events):
+            context = get_current_context()
+            dag_run = context["dag_run"]
+
+            outlet_events[CONTEXT_AIR_QUALITY].extra = {
+                "process_date": context["logical_date"].strftime("%Y-%m-%d"),
+                "is_backfill": dag_run.run_type == "backfill",
+            }
+
+        weather_data = (process_data
+            .override(group_id="weather_etl", group_display_name="Weather ETL")
+            .partial(config=DATASETS.get("weather"), region=region)
+            .expand(city=cities)
         )
-    }
-)
-def openmeteo_handler():
 
-    @task
-    def get_region() -> str:
-        context = get_current_context()
-        return context["params"]["region"]
+        air_quality_data = (process_data
+            .override(group_id="air_quality_etl", group_display_name="Air Quality ETL")
+            .partial(config=DATASETS.get("air_quality"), region=region)
+            .expand(city=cities)
+        )
 
-    @task
-    def get_cities_list(region: str) -> list:
-        cities_path = PROJECT_ROOT_PATH / "data" / "input" / "cities.json"
-        with cities_path.open("r", encoding="utf-8") as file:
-            regions = json.load(file)
+        weather_data >> publish_weather_asset()
+        air_quality_data >> publish_air_quality_asset()
 
-        try:
-            return regions["regioes"][region]
-        except KeyError as error:
-            raise ValueError(
-                f"Invalid region: '{region}'. Use sul, sudeste or nordeste."
-            ) from error
-
-    @task(outlets=[CONTEXT_WEATHER])
-    def publish_weather_asset(*, outlet_events):
-        context = get_current_context()
-        dag_run = context["dag_run"]
-
-        outlet_events[CONTEXT_WEATHER].extra = {
-            "process_date": context["logical_date"].strftime("%Y-%m-%d"),
-            "is_backfill": dag_run.run_type == "backfill",
-        }
-
-    @task(outlets=[CONTEXT_AIR_QUALITY])
-    def publish_air_quality_asset(*, outlet_events):
-        context = get_current_context()
-        dag_run = context["dag_run"]
-
-        outlet_events[CONTEXT_AIR_QUALITY].extra = {
-            "process_date": context["logical_date"].strftime("%Y-%m-%d"),
-            "is_backfill": dag_run.run_type == "backfill",
-        }
-
-    region = get_region()
-    cities = get_cities_list(region=region)
-    weather_data = (process_data
-        .override(group_id="weather_etl", group_display_name="Weather ETL")
-        .partial(config=DATASETS.get('weather'), region=region)
-        .expand(city=cities)
-    )
-
-    air_quality_data = (process_data
-        .override(group_id="air_quality_etl", group_display_name="Air Quality ETL")
-        .partial(config=DATASETS.get('air_quality'), region=region)
-        .expand(city=cities)
-    )
-
-    weather_data >> publish_weather_asset()
-    air_quality_data >> publish_air_quality_asset()
+    return regional_openmeteo_dag()
 
 
-openmeteo_handler()
+for region, cities in CITIES_BY_REGION.items():
+    create_region_dag(region, cities)

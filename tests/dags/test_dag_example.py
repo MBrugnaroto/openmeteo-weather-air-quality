@@ -81,3 +81,20 @@ def test_dag_retries(dag_id, dag, fileloc):
     assert (
         dag.default_args.get("retries", None) >= 2
     ), f"{dag_id} in {fileloc} must have task retries >= 2."
+
+
+def test_openmeteo_region_dags_are_generated():
+    with suppress_logging("airflow"):
+        dag_bag = DagBag(dag_folder="dags/openmeteo_handler.py", include_examples=False)
+
+    regional_dags = [
+        dag_id
+        for dag_id in dag_bag.dags
+        if dag_id.startswith("openmeteo_")
+    ]
+
+    assert sorted(regional_dags) == [
+        "openmeteo_nordeste",
+        "openmeteo_sudeste",
+        "openmeteo_sul",
+    ]
