@@ -11,29 +11,28 @@ generate Markdown reports with an AI agent.
 
 ### Data flow
 
-```text
-cities.json
-    |
-    v
-Regional Open-Meteo DAG -- one daily run per region
-    |-- Weather ETL --> data/raw/weather/
-    |                 --> data/context/weather/
-    |
-    `-- Air Quality ETL --> data/raw/air_quality/
-                           --> data/context/air_quality/
-                                           |
-                                           v
-                                  Airflow Assets
-                                           |
-                 +-------------------------+-------------------------+
-                 v                                                   v
-   Weather Alert DAG                                   Air Quality Alert DAG
-   temperature >= 30 °C                               daily mean PM2.5 > 15 µg/m³
-                                                       or PM10 > 45 µg/m³
-                 |                                                   |
-                 v                                                   v
-           data/semantic/                                      data/semantic/
-           data/reports/                                       data/reports/
+```mermaid
+flowchart TD
+    CITIES["cities.json"]
+    CITIES --> REGION["Regional Open-Meteo DAG<br/>one daily run per region"]
+
+    subgraph INGESTION["Regional ingestion"]
+        REGION --> WEATHER["Weather ETL"]
+        REGION --> AIR["Air Quality ETL"]
+        WEATHER --> RAW_WEATHER[("data/raw/weather")]
+        WEATHER --> CONTEXT_WEATHER[("data/context/weather")]
+        AIR --> RAW_AIR[("data/raw/air_quality")]
+        AIR --> CONTEXT_AIR[("data/context/air_quality")]
+    end
+
+    CONTEXT_WEATHER --> WEATHER_ASSET{{"CONTEXT_WEATHER Asset"}}
+    CONTEXT_AIR --> AIR_ASSET{{"CONTEXT_AIR_QUALITY Asset"}}
+
+    WEATHER_ASSET --> WEATHER_ALERT["Weather Alert DAG<br/>temperature >= 30 °C"]
+    AIR_ASSET --> AIR_ALERT["Air Quality Alert DAG<br/>PM2.5 > 15 µg/m³ or PM10 > 45 µg/m³"]
+
+    WEATHER_ALERT --> WEATHER_OUTPUT[("data/semantic/weather<br/>data/reports/weather")]
+    AIR_ALERT --> AIR_OUTPUT[("data/semantic/air_quality<br/>data/reports/air_quality")]
 ```
 
 Each region generates a dynamic daily DAG:
@@ -138,14 +137,21 @@ The alert DAGs schedule themselves with `schedule=[CONTEXT_WEATHER]` or
 
 The workflow is not driven by a traditional one-DAG predecessor:
 
-```text
-regional extraction and transformation
-                |
-                v
-        publish Weather Asset
-                |
-                v
-      trigger temperature alert DAG
+```mermaid
+flowchart LR
+    ETL["Regional extraction and transformation"]
+    PUBLISH["Publish Airflow Asset"]
+    EVENT["Asset event<br/>process_date + region + is_backfill"]
+    ALERT["Alert DAG"]
+    GATE{{"Non-backfill and alert found?"}}
+    REPORT["Generate and write Markdown report"]
+
+    ETL --> PUBLISH
+    PUBLISH --> EVENT
+    EVENT --> ALERT
+    ALERT --> GATE
+    GATE -->|Yes| REPORT
+    GATE -->|No| SKIP["Update semantic data or skip report"]
 ```
 
 The same pattern applies to air quality. Multiple region Asset events can also
