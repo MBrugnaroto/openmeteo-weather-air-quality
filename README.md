@@ -91,20 +91,95 @@ flowchart TD
 - Automated weather and air-quality alert/report workflows.
 - Date-partitioned outputs; backfills update data without generating AI reports.
 
+## Technologies
+
+- Apache Airflow with Astronomer Runtime
+- Astronomer Astro CLI and Docker
+- Open-Meteo Weather API
+- Open-Meteo Air Quality API
+- Pandas and PyArrow for processing and Parquet
+- Pydantic AI for tools and agent-generated reports
+- Requests Cache and Retry Requests for HTTP caching and retries
+
+The main Python dependencies are listed in
+[`requirements.txt`](requirements.txt).
+
 ## Local Development Setup
 
-**Prerequisites:** Docker, Astronomer Astro CLI, and network access to Open-Meteo. Configure `WeatherAlert` for AI-generated reports.
+### 0. Requirements
 
-Start the local Airflow environment:
+- Docker
+- Astro CLI
+- Network access to the Open-Meteo APIs
+- An LLM connection configured in Airflow to generate reports
+
+### 1. Start the environment
+
+From the project root:
 
 ```bash
-astro dev start
+$ astro dev start
 ```
 
-Run the test suite:
+The environment is available at:
+
+- Airflow UI: `http://localhost:8080`
+- Default Astro username: `admin`
+- Default Astro password: `admin`
+
+### 2. Configure the Open-Meteo connection
+
+The [`airflow_settings.yaml`](airflow_settings.yaml) file configures an HTTP
+connection named `open-meteo-weather-api`. The local project includes this
+configuration, although the current ingestion code calls the endpoints directly
+through the Open-Meteo SDK.
+
+### 3. Configure the AI agent
+
+Both report DAGs use the AI connection named `WeatherAlert`. Configure it in
+the Airflow UI under **Admin > Connections**, or through an environment variable
+supported by your provider.
+
+Tasks may have no actionable alerts. In that case, the `short_circuit` operator
+stops the DAG before invoking the agent.
+
+## Container configuration
+
+The [`Dockerfile`](Dockerfile) uses Astronomer Runtime and runs Airflow with
+the non-root `astro` user. The default UID is `1000`, aligned with the
+workspace user.
+
+If the host user has a different UID, update the default argument and recreate
+the environment:
+
+```dockerfile
+ARG AIRFLOW_UID=<your_uid>
+```
+
+The `data/` directory is copied into the image during the build. After changing
+[`data/input/cities.json`](data/input/cities.json), rebuild or restart the
+environment to make the updated file available:
 
 ```bash
-astro dev pytest
+$ astro dev restart
+```
+
+### Repair legacy log permissions
+
+Environments created previously may contain logs owned by the legacy `50000`
+UID. Repair the volume once with:
+
+```bash
+$ docker exec --user root <scheduler-container> chown -R 1000:50000 /usr/local/airflow/logs
+$ docker restart <dag-processor-container>
+```
+
+## Run tests
+
+With the Astro environment running:
+
+```bash
+$ astro dev pytest
 ```
 
 ### Test coverage
@@ -112,12 +187,6 @@ astro dev pytest
 - DAG imports, tags, retries, and generation of three regional DAGs.
 - Temperature threshold, date/region filters, semantic partitions, and Markdown report reads/writes.
 - Daily PM2.5/PM10 means and guidelines, date/region filters, partitioned alerts, and air-quality report reads/writes.
-
-The local `airflow_settings.yaml` declares `open-meteo-weather-api`, but ETL
-requests use the Open-Meteo Python SDK directly. The HTTP connection is not
-required for forecast ingestion.
-
-Stop the environment with `astro dev stop`.
 
 ## Project Policies
 
